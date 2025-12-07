@@ -1,0 +1,6 @@
+__pycache__
+/venv
+/django_amqp.egg-info
+/build
+/dist
+/uv.lock
