@@ -1,6 +1,10 @@
 BSD License
 
-Copyright (c) 2025, Karl Hobley
+Copyright (c) 2025, HarperCollins UK Publishers Ltd
+All rights reserved.
+
+Contains code from django-tasks (BSD License)
+Copyright (c) Jake Howard and individual contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
