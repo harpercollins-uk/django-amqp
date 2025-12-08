@@ -16,14 +16,15 @@ from django.db.utils import OperationalError
 from django.utils.autoreload import DJANGO_AUTORELOAD_ENV, run_with_reloader
 
 from django_tasks import DEFAULT_TASK_BACKEND_ALIAS, task_backends
-from django_tasks.backends.database.backend import AMQPBackend
 from django_tasks.base import DEFAULT_TASK_QUEUE_NAME, TaskContext
 from django_tasks.exceptions import InvalidTaskBackendError
 from django_tasks.signals import task_finished, task_started
 from django_tasks.utils import get_random_id
 
+from django_amqp.backend import AMQPBackend
+
 package_logger = logging.getLogger("django_tasks")
-logger = logging.getLogger("django_tasks.backends.database.db_worker")
+logger = logging.getLogger("django_tasks.backends.amqp.amqp_worker")
 
 
 class Worker:
