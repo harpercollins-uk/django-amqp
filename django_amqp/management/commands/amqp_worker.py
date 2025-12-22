@@ -84,11 +84,28 @@ class Command(BaseCommand):
             help="The queue to process.",
         )
 
+    def add_arguments(self, parser: ArgumentParser) -> None:
+        parser.add_argument(
+            "--burst",
+            action="store_true",
+            default=False,
+            help=(
+                "Run the worker in burst mode "
+                "(process all available tasks and then exit)."
+            ),
+        )
+
+
+
     def handle(self, *args, **options) -> None:
         queue_name = options.get("queue_name")
         if queue_name is None:
             raise ImproperlyConfigured(
                 "You must specify a --queue-name for the AMQP worker."
+            )
+        if not options.get("burst"):
+            raise NotImplemented(
+                "The AMQP worker only supports --burst mode currently."
             )
         worker = Worker(
             queue_name=queue_name,
