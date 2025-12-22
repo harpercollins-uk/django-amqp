@@ -1,17 +1,25 @@
 import json
 from unittest.mock import MagicMock, patch
+from django.core.exceptions import ImproperlyConfigured
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
-from ..management.commands.amqp_worker import Worker
+from django_amqp.management.commands.amqp_worker import Worker
 
 
 class AMQPWorkerTest(TestCase):
+    @override_settings(SERVICEBUS_CONNECTION_STRING="DUMMY_CONN_STRING")
     def test_worker_initialization(self):
         queue_name = "test-queue"
         worker = Worker(queue_name=queue_name)
         self.assertEqual(worker.queue_name, queue_name)
 
+    def test_worker_initialization_fails_no_conn_string(self):
+        queue_name = "test-queue"
+        with self.assertRaises(ImproperlyConfigured):
+            Worker(queue_name=queue_name)
+
+    @override_settings(SERVICEBUS_CONNECTION_STRING="DUMMY_CONN_STRING")
     @patch(
         "django_amqp.management.commands.amqp_worker.AzureServiceBusSubscriptionStreamer"
     )

@@ -2,9 +2,8 @@ import json
 from unittest.mock import MagicMock, patch
 
 from azure.servicebus import ServiceBusMessage
-from django.test import TestCase
-from django_tasks import task
-from django_tasks.task import Task
+from django.test import TestCase, override_settings
+from django.tasks.base import Task, task
 
 from django_amqp.backend import AMQPBackend
 
@@ -19,15 +18,13 @@ def dummy_function():
 
 
 class AMQPBackendTest(TestCase):
-    def setUp(self):
-        self.backend = AMQPBackend(alias="default", params={})
-        self.mock_task = MagicMock(spec=Task)
-
+    @override_settings(SERVICEBUS_CONNECTION_STRING="DUMMY_CONN_STRING")
     @patch("azure.servicebus.ServiceBusClient.from_connection_string")
     def test_enqueue_task(self, mock_servicebus):
+        backend = AMQPBackend(alias="default", params={})
         mock_sender = MagicMock()
         mock_servicebus.return_value.get_queue_sender.return_value = mock_sender
-        self.backend.enqueue(dummy_function, args=("arg1",), kwargs={"key": "value"})
+        backend.enqueue(dummy_function, args=("arg1",), kwargs={"key": "value"})
 
         # Ensure message is correctly structured
         expected_message_content = json.dumps(
