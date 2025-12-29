@@ -25,4 +25,4 @@ USE_TZ = True
 
 if not IN_TEST:
     DEBUG = True
-    TASKS = {"default": {"BACKEND": "django_amqp.backend.AMQPBackend"}}
+    TASKS = {"default": {"BACKEND": "django_amqp.backend.ServiceBusBackend"}}

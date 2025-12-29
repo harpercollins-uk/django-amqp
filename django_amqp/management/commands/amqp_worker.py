@@ -84,7 +84,6 @@ class Command(BaseCommand):
             help="The queue to process.",
         )
 
-    def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument(
             "--burst",
             action="store_true",

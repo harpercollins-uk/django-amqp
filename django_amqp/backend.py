@@ -2,13 +2,13 @@ import json
 from typing import Any, TypeVar
 
 from azure.servicebus import ServiceBusClient, ServiceBusMessage
-from django.conf import settings
 from django.utils import timezone
 from django.tasks.backends.base import BaseTaskBackend
 from django.tasks.base import Task
 from pydantic import BaseModel
 from typing_extensions import ParamSpec
 from django.core.exceptions import ImproperlyConfigured
+from abc import abstractmethod
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -31,15 +31,6 @@ class AMQPBackend(BaseTaskBackend):
 
     def __init__(self, alias: str, params: dict):
         super().__init__(alias, params)
-        self.tasks = {}
-        try:
-            conn_str = settings.SERVICEBUS_CONNECTION_STRING
-            if not conn_str:
-                raise AttributeError
-        except AttributeError:
-            raise ImproperlyConfigured(
-                "SERVICEBUS_CONNECTION_STRING should be set for the AMQP worker."
-            )
 
     def enqueue(
         self,
@@ -54,13 +45,31 @@ class AMQPBackend(BaseTaskBackend):
         This must be in the future at time of sending message
         """
 
-        servicebus_client = ServiceBusClient.from_connection_string(
-            conn_str=settings.SERVICEBUS_CONNECTION_STRING
-        )
+        message_content = self._prepare_message(task, args, kwargs)
 
-        sender = servicebus_client.get_queue_sender(queue_name=task.queue_name)
+        if task.run_after:
+            if task.run_after <= timezone.now():
+                raise ValueError("schedule_time must be in the future")
+            return self._send_scheduled_message(
+                task.queue_name, message_content, task.run_after
+            )
 
-        message_content = json.dumps(
+        self._send_message(task.queue_name, message_content)
+
+    def batch_enqueue(self, task: Task, jobs_data: list[tuple[P.args, P.kwargs]]):
+        """
+        Enqueue multiple tasks in a batch for efficiency.
+        """
+        messages = []
+        for task_args, task_kwargs in jobs_data:
+            message_content = self._prepare_message(task, task_args, task_kwargs)
+            messages.append(message_content)
+
+        self._send_batch_messages(task.queue_name, messages)
+
+    def _prepare_message(self, task: Task, args: P.args, kwargs: P.kwargs) -> str:
+        """Prepare the message content as JSON string"""
+        return json.dumps(
             TaskStructure(
                 func=task.module_path,
                 args=args,
@@ -68,50 +77,92 @@ class AMQPBackend(BaseTaskBackend):
             ).model_dump()
         )
 
+    @abstractmethod
+    def _send_message(self, queue_name: str, message_content: str) -> None:
+        """Send a single message to the queue"""
+        pass
+
+    @abstractmethod
+    def _send_scheduled_message(
+        self, queue_name: str, message_content: str, scheduled_time
+    ) -> int:
+        """Send a scheduled message to the queue. Returns message ID."""
+        pass
+
+    @abstractmethod
+    def _send_batch_messages(self, queue_name: str, messages: list[str]) -> None:
+        """Send multiple messages in a batch"""
+        pass
+
+
+class ServiceBusBackend(AMQPBackend):
+    """
+    Azure Service Bus implementation of the AMQP backend.
+    """
+
+    def __init__(self, alias: str, params: dict):
+        super().__init__(alias, params)
+        self._client = None
+        if not params.get("OPTIONS") or not params.get("OPTIONS").get(
+            "connection_string"
+        ):
+            raise ImproperlyConfigured(
+                "ServiceBusBackend requires 'connection_string' in options"
+            )
+        self.connection_string = params["OPTIONS"].get("connection_string")
+
+    @property
+    def client(self) -> ServiceBusClient:
+        """Lazy initialization of ServiceBusClient"""
+        if self._client is None:
+            self._client = ServiceBusClient.from_connection_string(
+                conn_str=self.connection_string
+            )
+        return self._client
+
+    def _send_message(self, queue_name: str, message_content: str) -> None:
+        """Send a single message to Azure Service Bus"""
+        sender = self.client.get_queue_sender(queue_name=queue_name)
         message = ServiceBusMessage(message_content)
-
-        if task.run_after:
-            if task.run_after <= timezone.now():
-                raise ValueError("schedule_time must be in the future")
-            # this returns the servicebus sequence number (i.e. unique id of the
-            # scheduled message). This can be used to cancel the scheduled message
-            return sender.schedule_messages(message, task.run_after)
-
         sender.send_messages(message)
 
-    def batch_enqueue(self, task: Task, jobs_data: list[tuple[P.args, P.kwargs]]):
-        with ServiceBusClient.from_connection_string(
-            conn_str=settings.SERVICEBUS_CONNECTION_STRING
-        ) as servicebus_client:
-            sender = servicebus_client.get_queue_sender(queue_name=task.queue_name)
-            batch_message = sender.create_message_batch()
-
-            while jobs_data:
-                task_args, task_kwargs = jobs_data.pop(0)
-
-                message_content = json.dumps(
-                    TaskStructure(
-                        func=task.module_path,
-                        args=task_args,
-                        kwargs=task_kwargs,
-                    ).model_dump()
-                )
-
-                try:
-                    batch_message.add_message(ServiceBusMessage(message_content))
-                except ValueError:
-                    sender.send_messages(batch_message)
-                    batch_message = sender.create_message_batch()
-                    batch_message.add_message(ServiceBusMessage(message_content))
-
-            sender.send_messages(batch_message)
-
-    def validate_task(self, task: Task) -> None:
+    def _send_scheduled_message(
+        self, queue_name: str, message_content: str, scheduled_time
+    ) -> int:
         """
-        Add task to task register and validate task.
-
-        Determine whether the provided task is one which can be executed by the backend.
+        Send a scheduled message to Azure Service Bus.
+        Returns the servicebus sequence number (i.e. unique id of the
+        scheduled message). This can be used to cancel the scheduled message.
         """
+        sender = self.client.get_queue_sender(queue_name=queue_name)
+        message = ServiceBusMessage(message_content)
+        return sender.schedule_messages(message, scheduled_time)
 
-        super().validate_task(task)
-        self.tasks[task.func.__qualname__] = task.func
+    def _send_batch_messages(self, queue_name: str, messages: list[str]) -> None:
+        """Send multiple messages in a batch to Azure Service Bus"""
+        sender = self.client.get_queue_sender(queue_name=queue_name)
+        batch_message = sender.create_message_batch()
+
+        messages_to_send = messages.copy()
+        while messages_to_send:
+            message_content = messages_to_send.pop(0)
+            try:
+                batch_message.add_message(ServiceBusMessage(message_content))
+            except ValueError:
+                # Batch is full, send it and create a new one
+                sender.send_messages(batch_message)
+                batch_message = sender.create_message_batch()
+                batch_message.add_message(ServiceBusMessage(message_content))
+
+        # Send remaining messages
+        sender.send_messages(batch_message)
+
+    def close(self):
+        """Close the ServiceBusClient connection"""
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def __del__(self):
+        """Cleanup on deletion"""
+        self.close()
