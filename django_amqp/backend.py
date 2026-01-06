@@ -39,8 +39,6 @@ class AMQPBackend(BaseTaskBackend):
         kwargs: P.kwargs,
     ) -> None | int:
         """
-        Container apps jobs are queued to Azure Service Bus
-
         Tasks can be scheduled for later by including a utc time to send
         This must be in the future at time of sending message
         """
@@ -98,6 +96,8 @@ class AMQPBackend(BaseTaskBackend):
 class ServiceBusBackend(AMQPBackend):
     """
     Azure Service Bus implementation of the AMQP backend.
+
+    Container apps jobs are queued to Azure Service Bus
     """
 
     def __init__(self, alias: str, params: dict):
