@@ -4,14 +4,23 @@ AMQP support for Django, with implementations for RabbitMQ and Azure ServiceBus.
 
 ## Overview
 
-Django AMQP is an extension for Django that provides Advanced Message Queuing Protocol (AMQP) support. It enables you to easily implement message queues and task processing in your Django applications using either RabbitMQ or Azure Service Bus as the backend.
+Django AMQP is an extension for Django that provides Advanced Message Queuing Protocol
+(AMQP) support. It enables you to easily implement message queues and task processing
+in your Django applications using either RabbitMQ or Azure Service Bus as the backend.
 
-The library integrates with Django's task framework, allowing you to define, queue, and process asynchronous tasks with support for scheduled/deferred execution.
+The library integrates with Django's task framework, allowing you to define, queue, and
+process asynchronous tasks with support for scheduled/deferred execution.
 
 ## Installation
 
 ```bash
 pip install django-amqp
+```
+
+OR
+
+```bash
+uv add django-amqp
 ```
 
 ## Configuration
@@ -31,18 +40,9 @@ Configure your task backend in `settings.py`:
 ```python
 SERVICEBUS_CONNECTION_STRING = os.environ.get("SERVICEBUS_CONNECTION_STRING")
 
-TASK_BACKEND_MAPPING = {
-    "immediate": "django_tasks.backends.immediate.ImmediateBackend",
-    "service-bus": "audioai.django_amqp.backend.ServiceBusBackend",
-    "dummy": "django_tasks.backends.dummy.DummyBackend",
-    "database": "django_tasks.backends.database.DatabaseBackend",
-}
-
 TASKS = {
     "default": {
-        "BACKEND": TASK_BACKEND_MAPPING.get(
-            os.environ.get("TASKS_BACKEND", "immediate"),
-        ),
+        "BACKEND": "django_amqp.backend.ServiceBusBackend",
         "QUEUES": [
             "default",
         ],
@@ -50,8 +50,6 @@ TASKS = {
     }
 }
 
-# For worker commands
-SERVICEBUS_CONNECTION_STRING = "your-servicebus-connection-string-from-env-var"
 ```
 
 ## Usage
@@ -69,15 +67,50 @@ def my_background_task(param1, param2, **kwargs):
     pass
 ```
 
+> **_NOTE:_** `queue_name` defaults to `"default"` (as per django tasks implementation).
+> You may want to name your main worker ServiceBus/RabbitMQ queue as `"default"` to
+> match this. Otherwise, specify`queue_name` for each task.\*
+
 ### Queueing Tasks
 
-Queue a task for immediate execution:
+#### Queue a Task for Immediate Execution
 
 ```python
 from myapp.tasks import my_background_task
 
 # Queue for immediate execution
 my_background_task.enqueue(param1="value1", param2="value2")
+```
+
+you can also batch queue
+
+```python
+from myapp.tasks import my_background_task
+
+# Batch Queue for immediate execution
+my_background_task.get_backend().batch_enqueue(
+    my_background_task, [
+        ([], {param1="value1", param2="value2"})
+        ([], {param1="value3", param2="value4"})
+        ]
+)
+# It's more performant to queue many messages at once, instead of making a connection
+# for each
+```
+
+#### Queue and Cancel a Task for Delayed Execution
+
+You can cancel scheduled messages using the sequence number returned when scheduling a
+message:
+
+```python
+from django_amqp.service_bus import cancel_deferred_message
+
+# Schedule a task and get the sequence number
+sequence_number = my_background_task.delay_until(future_time, param1="value1")
+
+# Later, if you need to cancel it
+cancel_deferred_message(sequence_number, queue_name="my-queue")
 ```
 
 ### Running Workers
@@ -90,26 +123,13 @@ python manage.py amqp_worker --queue-name="my-queue" --burst
 
 The `--burst` flag tells the worker to process all available messages and then exit.
 
-## Advanced Usage
-
-### Cancelling Scheduled Messages
-
-You can cancel scheduled messages using the sequence number returned when scheduling a message:
-
-```python
-from django_amqp.service_bus import cancel_deferred_message
-
-# Schedule a task and get the sequence number
-sequence_number = my_background_task.delay_until(future_time, param1="value1")
-
-# Later, if you need to cancel it
-cancel_deferred_message(sequence_number, queue_name="my-queue")
-```
-
 ### Error Handling
 
-Failed tasks are automatically moved to the dead-letter queue with the error reason and description. You can implement additional error handling in your task functions.
+When using the ServiceBus Backend, failed tasks are automatically moved to the
+dead-letter queue with the error reason and description. You can implement additional
+error handling in your task functions.
 
 ## License
 
-This project is licensed under the BSD 3-Clause License - see the LICENSE file for details.
+This project is licensed under the BSD 3-Clause License - see the LICENSE file for
+details.
