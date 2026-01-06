@@ -90,8 +90,8 @@ from myapp.tasks import my_background_task
 # Batch Queue for immediate execution
 my_background_task.get_backend().batch_enqueue(
     my_background_task, [
-        ([], {param1="value1", param2="value2"})
-        ([], {param1="value3", param2="value4"})
+            ([], {param1="value1", param2="value2"}),
+            ([], {param1="value3", param2="value4"})
         ]
 )
 # It's more performant to queue many messages at once, instead of making a connection
